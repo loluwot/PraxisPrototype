@@ -37,7 +37,7 @@ class System:
         #node generation
         for _ in range(n_nodes):
             S = random.random() < source_ratio
-            node = Node(np.rint(np.random.randn(2)*math.sqrt(node_clustering/2)), source=S, inventory=dict(zip(food_types, initial_inventory)))
+            node = Node(np.rint(np.random.randn(2)*node_clustering/math.sqrt(2)), source=S, inventory=dict(zip(food_types, initial_inventory)))
             self.nodes[S][f'{NAMES[S]} {self.count[S]}'] = node
             self.count[S] += 1
         
@@ -48,8 +48,12 @@ class System:
         self.node_to_index = dict(zip(self.index_to_node, range(len(self.index_to_node))))
 
         for from_i in range(n_nodes):
-            for to_i in range(n_nodes):
-                self.dist_matrix[from_i][to_i] = round(np.linalg.norm(self.combined_dict[self.index_to_node[from_i]].location - self.combined_dict[self.index_to_node[to_i]].location, ord=DIST_TYPE))
+            for to_i in range(from_i+1):
+                v = round(np.linalg.norm(self.combined_dict[self.index_to_node[from_i]].location - self.combined_dict[self.index_to_node[to_i]].location, ord=DIST_TYPE))
+                self.dist_matrix[from_i][to_i] = v
+                self.dist_matrix[to_i][from_i] = v
+                #trivial dist matrix
+                # self.dist_matrix[from_i][to_i] = 0 if from_i == to_i else 10
                 #probably use something like google distmatrix api to find dist irl
         
         # print(self.dist_matrix)
@@ -78,7 +82,6 @@ class System:
         if not all([self.convert_to_node(source).inventory[k] >= v for k, v in amounts.items()]):
             print('Invalid request, not enough inventory.')
             return 0
-        
         heapq.heappush(self.requests, (priority, self.convert_to_index(source), self.convert_to_index(dest), Counter(amounts)))
         return 1
 
@@ -101,6 +104,7 @@ class System:
 
     def recommend_requests(self, topn=10, cache=3, cur_location=0, remove=True):
         #caches "cache" number of paths that are non intersecting; that way recommendations work in system with multiple drivers
+        #assume cars can start anywhere?
         if self.cached:
             if remove:
                 popped = self.cached.pop(0)
@@ -115,13 +119,17 @@ class System:
             else:
                 return self.cached[0]
         fulfill = heapq.nsmallest(topn, self.requests)
+        print(fulfill)
+        if not fulfill:
+            print('No requests')
+            return
         #or tools stuff
-        
         index = self.n_nodes
         assignment_to_node = dict([(i, i) for i in range(self.n_nodes)]) 
         node_to_assignments = dict([(i, [i]) for i in range(self.n_nodes)]) 
         assignment_count = dict([(i, 0) for i in range(self.n_nodes)])
-
+        assignment_count[cur_location] += 1
+        
         augmented_dist_matrix = defaultdict(lambda: defaultdict(lambda: math.inf))
         for i in range(self.n_nodes):
             for j in range(self.n_nodes):
@@ -132,21 +140,21 @@ class System:
             cur_v = v
             while assignment_count[v] > len(node_to_assignments[v]):
                 assignment_to_node[index] = v
-                node_to_assignments[v].append(index)
                 #new node should have distance 0
                 #new node should have equivalent connections to other nodes
-                for i in range(index):
-                    augmented_dist_matrix[index][i] = augmented_dist_matrix[v][i]
-                    augmented_dist_matrix[i][index] = augmented_dist_matrix[i][v]
-
+                for v_alt in node_to_assignments[v]:
+                    # print('ALT:', v_alt, 'REAL:', v)
+                    for i in range(index):
+                        augmented_dist_matrix[index][i] = augmented_dist_matrix[v_alt][i]
+                        augmented_dist_matrix[i][index] = augmented_dist_matrix[i][v_alt]
+                    augmented_dist_matrix[v_alt][index] = 0
+                    augmented_dist_matrix[index][v_alt] = 0 
+                node_to_assignments[v].append(index)
                 augmented_dist_matrix[index][index] = 0 
-                augmented_dist_matrix[v][index] = 0
-                augmented_dist_matrix[index][v] = 0 
-
                 cur_v = index
                 index += 1
             return index, cur_v
-        
+
         tups = []
         occured = set()
         for _, *tup, amount in fulfill:
@@ -155,15 +163,32 @@ class System:
             occured.add(tup_new1)
             occured.add(tup_new2)
             tups.append((tup_new1, tup_new2, amount))
-        
-        manager = pywrapcp.RoutingIndexManager(len(augmented_dist_matrix),
+        print('TUPS', tups)
+        print('FINAL INDEX', index)
+        print('ASSIGNMENTS', node_to_assignments)
+        print('OCCURENCES', occured)
+        print('\n'.join([' '.join([str(augmented_dist_matrix[i][j]) for j in range(index)]) for i in range(index)]))
+        # print(any([augmented_dist_matrix[i][j] == math.inf for i in range(index) for j in range(index)]))
+
+        manager = pywrapcp.RoutingIndexManager(index,
                                            cache, cur_location) #assume all vehicles start and end at common location; not necessarily a good assumption if drivers can start from home, etc..
-        routing = pywrapcp.RoutingModel(manager)
-        routing.AddDisjunction([manager.NodeToIndex(node) for node in range(index) if node not in occured], -1) #nodes not in requests should not appear at all
-        # routing.AddDisjunction([manager.NodeToIndex(node) for node in range(index) if node in occured], 30000) #nodes not in requests should not appear at all
+        # manager = pywrapcp.RoutingIndexManager(10,
+        #                                    3, 0) #assume all vehicles start and end at common location; not necessarily a good assumption if drivers can start from home, etc..
+        routing_parameters = pywrapcp.DefaultRoutingModelParameters()
+        # routing_parameters.solver_parameters.trace_propagation = True
+        # routing_parameters.solver_parameters.trace_search = True
+
+        routing = pywrapcp.RoutingModel(manager, routing_parameters)
+        # print([manager.NodeToIndex(node) for node in range(index) if node not in occured])
+        L = [manager.NodeToIndex(node) for node in range(index) if node not in occured]
+        if L:
+            routing.AddDisjunction(L, -1) #nodes not in requests should not appear at all
+        # routing.AddDisjunction([manager.NodeToIndex(node) for node in range(index) if node in occured], 30000) #nodes in requests should be able to be dropped at a cost
+
 
         def distance_callback(from_index, to_index):
             n1, n2 = [manager.IndexToNode(x) for x in [from_index, to_index]]
+            # print('CALLED BACK DISTANCE', augmented_dist_matrix[n1][n2])
             return augmented_dist_matrix[n1][n2]
         
         transit_callback_index = routing.RegisterTransitCallback(distance_callback)
@@ -176,7 +201,7 @@ class System:
             True,  # start cumul to zero
             dimension_name)
         distance_dimension = routing.GetDimensionOrDie(dimension_name)
-        distance_dimension.SetGlobalSpanCostCoefficient(1000)
+        distance_dimension.SetGlobalSpanCostCoefficient(10)
         trimmed_requests = defaultdict(lambda: defaultdict(lambda: Counter()))
         # print(tups)
         starter = set()
@@ -186,6 +211,7 @@ class System:
             trimmed_requests[tup[1]] = (tup[0], Counter(dict([(k, -v) for k, v in amount.items()])))
             pickup_index, delivery_index = [manager.NodeToIndex(x) for x in tup]
             # print(pickup_index, delivery_index)
+            # print('INDICES', pickup_index, delivery_index)
             routing.AddPickupAndDelivery(pickup_index, delivery_index)
             routing.solver().Add(
             routing.VehicleVar(pickup_index) == routing.VehicleVar(
@@ -193,24 +219,31 @@ class System:
             routing.solver().Add(
                 distance_dimension.CumulVar(pickup_index) <=
                 distance_dimension.CumulVar(delivery_index))
-            
+
+        # print('GOT HERE')
+        # print(pywrapcp.DefaultRoutingSearchParameters())
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
         search_parameters.first_solution_strategy = (
             routing_enums_pb2.FirstSolutionStrategy.PARALLEL_CHEAPEST_INSERTION)
         search_parameters.local_search_metaheuristic = (
-        routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH)
-        search_parameters.time_limit.seconds = 5
-        search_parameters.log_search = False
+        # routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH)
+        routing_enums_pb2.LocalSearchMetaheuristic.AUTOMATIC)
+        search_parameters.time_limit.seconds = 10
+        # search_parameters.solution_limit = 1
+        search_parameters.log_search = True
         solution = routing.SolveWithParameters(search_parameters)
-
+        print(routing.status())
         # print(solution)
+
         routes = [[] for _ in range(cache)]
         satisfied_requests = [[] for _ in range(cache)]
 
         for v_id in range(cache):
-            index = routing.Start(v_id)
-            while not routing.IsEnd(index):
-                N = manager.IndexToNode(index)
+            idx = routing.Start(v_id)
+            # print(index)
+            while not routing.IsEnd(idx):
+                N = manager.IndexToNode(idx)
+                # print(N)
                 if N in starter:
                     satisfied_requests[v_id].append((assignment_to_node[N], assignment_to_node[trimmed_requests[N][0]]))
                 
@@ -218,22 +251,23 @@ class System:
                     routes[v_id].append([assignment_to_node[N], trimmed_requests[N][1]])
                 else:
                     routes[v_id][-1][1].update(trimmed_requests[N][1])
-                index = solution.Value(routing.NextVar(index))
-
-            N = manager.IndexToNode(index)
+                # print(routing.NextVar(idx))
+                idx = solution.Value(routing.NextVar(idx))
+            # print(routes[v_id])
+            N = manager.IndexToNode(idx)
             if len(routes[v_id]) == 0 or assignment_to_node[N] != routes[v_id][-1][0]:
                 routes[v_id].append([assignment_to_node[N], trimmed_requests[N][1]])
             else:
                 routes[v_id][-1][1].update(trimmed_requests[N][1])
-
             routes[v_id] = [routes[v_id][0]] + list(filter(lambda x: any(x[1].values()), routes[v_id][1:-1])) + [routes[v_id][-1]] 
 
         # print(satisfied_requests)
         routes = list(zip(routes, satisfied_requests))
+        print('ROUTES', [list(zip(*routes[i][0]))[0] for i in range(cache)])
         routes = list(filter(lambda x: len(x[0]) > 2, routes))
         if remove:
             self.cached = routes[1:]
-            # print(routes[0][1])
+            # print(routes[0])
             solved_reqs = routes[0][1]
             qs = []
             for _ in range(min(topn, len(self.requests))):
@@ -241,7 +275,6 @@ class System:
                 if v[1:-1] not in solved_reqs:
                     qs.append(v)
             [heapq.heappush(self.requests, x) for x in qs] #repush
-            
         return routes[0]
 
     def print_route_information(self, x):
