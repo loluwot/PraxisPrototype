@@ -97,14 +97,12 @@ class System:
         # print(route_ids)
         R_NODES = 0.3
         points = [self.combined_dict[self.index_to_node[ids]].location for ids in route_ids]
-        def sign(x):
-            return abs(x)/x if x != 0 else 0
         [plt.arrow(points[i][0], points[i][1], (points[i+1] - points[i])[0]*(1-R_NODES/np.linalg.norm(points[i+1] - points[i])), (points[i+1] - points[i])[1]*(1-R_NODES/np.linalg.norm(points[i+1] - points[i])), length_includes_head=True, head_width=0.3) for i in range(len(points) - 1)]
         # plt.plot(x, y)
 
     def recommend_requests(self, topn=10, cache=3, cur_location=0, remove=True):
         #caches "cache" number of paths that are non intersecting; that way recommendations work in system with multiple drivers
-        #assume cars can start anywhere?
+        #assume cars can start anywhere? (maybe a later addition)
         if self.cached:
             if remove:
                 popped = self.cached.pop(0)
@@ -278,8 +276,11 @@ class System:
         return routes[0]
 
     def print_route_information(self, x):
+        s = ''
         for i, tup in enumerate(x[0]):
-            print(f"{'Start at' if i == 0 else 'Goto'} {self.index_to_node[tup[0]]}.")
+            s += f"{'Start at' if i == 0 else 'Goto'} {self.index_to_node[tup[0]]}.\n"
             if len(tup[1]) > 0:
-                print('\n'.join([f"{'Pickup' if amt > 0 else 'Dropoff'} {abs(amt)} units of {k}." for k, amt in tup[1].items() if amt != 0]))
+                s += '\n'.join([f"{'Pickup' if amt > 0 else 'Dropoff'} {abs(amt)} units of {k}." for k, amt in tup[1].items() if amt != 0])
+                s += '\n'
+        return s
             
