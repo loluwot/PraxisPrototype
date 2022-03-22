@@ -59,18 +59,28 @@ def start():
 
     def update_requests():
         global system
-        recommended = system.recommend_requests(topn=min(5, len(system.requests)), cache=min(3, len(system.requests)), remove=False)
-        v = system.print_route_information(recommended)
+        recommended, distance = system.recommend_requests(topn=min(5, len(system.requests)), cache=min(3, len(system.requests)), remove=False)
+        v = system.print_route_information(recommended) + f'Total travel distance: {distance}\n'
+        v2 = system.print_requests()
         dpg.set_value('requests_recommendation', v)
-        pass
+        dpg.set_value('requests_avaliable', v2)
+        
 
+    def remove_request():
+        global system
+        recommended, distance = system.recommend_requests(topn=min(5, len(system.requests)), cache=min(3, len(system.requests)), remove=True)
+        update_requests()
+
+    def update_inventory():
+        pass
 
     def submit():
         global system, cur_request
         dpg.configure_item("submit_display", show=True)
         if cur_request[1][0]:
             dpg.set_value("submit_display", "Request added.")
-            system.add_request(*cur_request[1])
+            print(cur_request[1])
+            system.add_request(*cur_request[1], priority=0)
             [dpg.delete_item(connection) for connection in cur_request[0]]
             cur_request = [[], [None, None, defaultdict(lambda: 0)]]
             update_requests()
@@ -81,10 +91,21 @@ def start():
         dpg.add_window(label='Request Adder', tag='requests_add', width=600, height=400, pos=(200, 0))
         dpg.add_window(label='Request Recommender', tag='requests_accept', width=400, height=400, pos=(800, 0))
         dpg.add_text("Requests", parent='requests_add')
-        dpg.add_text("", parent='requests_accept', tag='requests_recommendation')
+
+        with dpg.table(parent='requests_accept', header_row=False, row_background=True,
+                   borders_innerH=True, borders_outerH=True, borders_innerV=True,
+                   borders_outerV=True, tag='main_table'):
+            for _ in range(2):
+                dpg.add_table_column(no_clip=True)
+            with dpg.table_row():
+                dpg.add_text("", tag='requests_recommendation')
+                dpg.add_text("", tag='requests_avaliable')
+
         # dpg.add_combo(label='Food Type', items=ITEMS, tag='food', parent='requests_add')
         dpg.add_button(label="Submit", tag='submit', parent='requests_add')
+        dpg.add_button(label="Fulfil Recommendation", tag='fulfil_recommend', parent='requests_accept')
         dpg.set_item_callback("submit", submit)
+        dpg.set_item_callback("fulfil_recommend", remove_request)
         dpg.add_text("Request added", parent='requests_add', show=False, tag='submit_display')
 
         # dpg.add_input_int(label='Food Amount', tag='amount', parent='requests_add', min_value=0, max_value=999, step=1, min_clamped=True)
@@ -93,7 +114,7 @@ def start():
         PADDING = (N_WARE + 1)//2 - 1
         GUESSED_HEIGHT = 100
         for i, (name, node) in enumerate(system.nodes[1].items()):
-            with dpg.node(label=name.replace('Restaurant', 'Rest.'), parent='locations', pos=((i//(300//GUESSED_HEIGHT))*100, (i % (300//GUESSED_HEIGHT))*GUESSED_HEIGHT+10)):
+            with dpg.node(label=name.replace('Restaurant', 'Donator'), parent='locations', pos=((i//(300//GUESSED_HEIGHT))*100, (i % (300//GUESSED_HEIGHT))*GUESSED_HEIGHT+10)):
                 for item in ITEMS:
                     with dpg.node_attribute(label='Output', attribute_type=dpg.mvNode_Attr_Output, tag=f'{name}_{item}'):
                         dpg.add_input_int(label=f"{item}", tag=f'amount_{name}_{item}', min_value=0, max_value=999, step=1, min_clamped=True, width=70)

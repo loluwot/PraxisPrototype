@@ -1,6 +1,5 @@
 from collections import defaultdict, Counter
 from re import M
-from aiohttp import request
 import numpy as np
 import random
 import math
@@ -8,6 +7,10 @@ import heapq
 from ortools.constraint_solver import routing_enums_pb2
 from ortools.constraint_solver import pywrapcp
 import matplotlib.pyplot as plt
+
+class ComparableCounter(Counter):
+    def __lt__(self, other):
+        return list(self.values()) < list(other.values())     
 
 class Node:
     def __init__(self, location, source=False, inventory=None) -> None:
@@ -82,7 +85,7 @@ class System:
         if not all([self.convert_to_node(source).inventory[k] >= v for k, v in amounts.items()]):
             print('Invalid request, not enough inventory.')
             return 0
-        heapq.heappush(self.requests, (priority, self.convert_to_index(source), self.convert_to_index(dest), Counter(amounts)))
+        heapq.heappush(self.requests, (priority, self.convert_to_index(source), self.convert_to_index(dest), ComparableCounter(amounts)))
         return 1
 
     def plot_nodes(self):
@@ -106,7 +109,7 @@ class System:
         if self.cached:
             if remove:
                 popped = self.cached.pop(0)
-                solved_reqs = popped[1]
+                solved_reqs = popped[0][1]
                 qs = []
                 for _ in range(min(len(self.requests), topn)):
                     v = heapq.heappop(self.requests)
@@ -120,7 +123,7 @@ class System:
         print(fulfill)
         if not fulfill:
             print('No requests')
-            return
+            return None, None
         #or tools stuff
         index = self.n_nodes
         assignment_to_node = dict([(i, i) for i in range(self.n_nodes)]) 
@@ -200,13 +203,13 @@ class System:
             dimension_name)
         distance_dimension = routing.GetDimensionOrDie(dimension_name)
         distance_dimension.SetGlobalSpanCostCoefficient(10)
-        trimmed_requests = defaultdict(lambda: defaultdict(lambda: Counter()))
+        trimmed_requests = defaultdict(lambda: defaultdict(lambda: ComparableCounter()))
         # print(tups)
         starter = set()
         for *tup, amount in tups:
             starter.add(tup[0])
             trimmed_requests[tup[0]] = (tup[1], amount)
-            trimmed_requests[tup[1]] = (tup[0], Counter(dict([(k, -v) for k, v in amount.items()])))
+            trimmed_requests[tup[1]] = (tup[0], ComparableCounter(dict([(k, -v) for k, v in amount.items()])))
             pickup_index, delivery_index = [manager.NodeToIndex(x) for x in tup]
             # print(pickup_index, delivery_index)
             # print('INDICES', pickup_index, delivery_index)
@@ -234,14 +237,18 @@ class System:
         # print(solution)
 
         routes = [[] for _ in range(cache)]
+        distances = [[] for _ in range(cache)]
         satisfied_requests = [[] for _ in range(cache)]
 
         for v_id in range(cache):
             idx = routing.Start(v_id)
             # print(index)
+            dist = 0
+            last_node = manager.IndexToNode(idx)
             while not routing.IsEnd(idx):
                 N = manager.IndexToNode(idx)
                 # print(N)
+                dist += augmented_dist_matrix[N][last_node]
                 if N in starter:
                     satisfied_requests[v_id].append((assignment_to_node[N], assignment_to_node[trimmed_requests[N][0]]))
                 
@@ -250,21 +257,23 @@ class System:
                 else:
                     routes[v_id][-1][1].update(trimmed_requests[N][1])
                 # print(routing.NextVar(idx))
+                last_node = N
                 idx = solution.Value(routing.NextVar(idx))
             # print(routes[v_id])
             N = manager.IndexToNode(idx)
+            dist += augmented_dist_matrix[N][last_node]
             if len(routes[v_id]) == 0 or assignment_to_node[N] != routes[v_id][-1][0]:
                 routes[v_id].append([assignment_to_node[N], trimmed_requests[N][1]])
             else:
                 routes[v_id][-1][1].update(trimmed_requests[N][1])
             routes[v_id] = [routes[v_id][0]] + list(filter(lambda x: any(x[1].values()), routes[v_id][1:-1])) + [routes[v_id][-1]] 
-
+            distances[v_id] = dist
         # print(satisfied_requests)
         routes = list(zip(routes, satisfied_requests))
         print('ROUTES', [list(zip(*routes[i][0]))[0] for i in range(cache)])
         routes = list(filter(lambda x: len(x[0]) > 2, routes))
         if remove:
-            self.cached = routes[1:]
+            self.cached = list(zip(routes[1:], distances[1:]))
             # print(routes[0])
             solved_reqs = routes[0][1]
             qs = []
@@ -273,14 +282,28 @@ class System:
                 if v[1:-1] not in solved_reqs:
                     qs.append(v)
             [heapq.heappush(self.requests, x) for x in qs] #repush
-        return routes[0]
+        return routes[0], distances[0]
 
     def print_route_information(self, x):
         s = ''
+        if not x:
+            return s
+        print(x)
         for i, tup in enumerate(x[0]):
+            print(tup)
             s += f"{'Start at' if i == 0 else 'Goto'} {self.index_to_node[tup[0]]}.\n"
             if len(tup[1]) > 0:
                 s += '\n'.join([f"{'Pickup' if amt > 0 else 'Dropoff'} {abs(amt)} units of {k}." for k, amt in tup[1].items() if amt != 0])
                 s += '\n'
+        return s
+            
+    def print_requests(self):
+        s = ''
+        sortedreq = sorted(self.requests)
+        print(sortedreq)
+        for i in range(len(self.requests)):
+            amount_s = '\n'.join([f'Amount of {food}: {sortedreq[i][3][food]}' for food in self.food_types])
+            s += f"Source: {self.convert_to_str(sortedreq[i][1])}\nDest: {self.convert_to_str(sortedreq[i][2])}\nAmounts:\n{amount_s}\n"
+        s += '\n'
         return s
             
