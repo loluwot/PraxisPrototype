@@ -1,5 +1,5 @@
 from collections import defaultdict, Counter
-from re import M
+from typing import Dict, List
 import numpy as np
 import random
 import math
@@ -7,63 +7,212 @@ import heapq
 from ortools.constraint_solver import routing_enums_pb2
 from ortools.constraint_solver import pywrapcp
 import matplotlib.pyplot as plt
+import json
+import itertools
+import re
+from string import ascii_lowercase
+from helpers import format_helper
+
 
 class ComparableCounter(Counter):
     def __lt__(self, other):
         return list(self.values()) < list(other.values())     
 
+class FoodType:
+    @classmethod
+    def fromstr(cls, query_s):
+        print(json.loads(query_s))
+        return cls(**json.loads(query_s))
+
+    def __init__(self, **args) -> None:
+        for k, v in args.items():
+            setattr(self, k, v)
+        self.rawargs = args
+        self.filters = dict([(k, str(v)) for k, v in args.items()])
+
+    def __str__(self) -> str:
+        return json.dumps(self.rawargs)
+
+    def __hash__(self) -> int:
+        return hash(str(self))
+
+    def __eq__(self, __o: object) -> bool:
+        return hash(self) == hash(__o)
+
+    def readable_raw(self) -> List:
+        L = []
+        for prop in dir(self):
+            s = format_helper(prop, getattr(self, prop))
+            if s:
+                L.append((prop, s))
+        return L
+
+    def readable(self) -> str:
+        return ', '.join(list(zip(*self.readable_raw()))[1])
+
 class Node:
-    def __init__(self, location, source=False, inventory=None) -> None:
+    def __init__(self, location, server_id, source=False) -> None:
         self.location = location
+        self.server_id = server_id
         self.source = source
-        if not source:
-            self.inventory = defaultdict(lambda: 0) if inventory is None else defaultdict(lambda: 0, inventory)
-        else:
-            self.inventory = defaultdict(lambda: math.inf)
+        # if not source:
+        #     self.inventory = defaultdict(lambda: 0) if inventory is None else defaultdict(lambda: 0, inventory)
+        # else:
+        #     self.inventory = defaultdict(lambda: math.inf)
         
+    def get_inv(self, food_types):
+        return dict(zip(food_types, [query_warehouse(str(food_type), self.server_id) for food_type in food_types]))
+
+    def __hash__(self) -> int:
+        return hash(self.location) + hash(self.server_id) + int(self.source)
+
+    def __eq__(self, __o: object) -> bool:
+        return hash(self) == hash(__o)
+
+    def json(self):
+        return {'location': self.location, 'id': self.server_id, 'source': self.source}
+
+class Request:
+    def __init__(self, source, dest, amounts, request_id) -> None:
+        self.source = source
+        self.dest = dest
+        self.amounts = amounts
+        self.request_id = request_id
+
+    def __eq__(self, __o: object) -> bool:
+        return (self.request_id == __o if not hasattr(__o, 'request_id') else self.request_id == __o.request_id)
+
+    def json(self):
+        return {'source': self.source, 'dest': self.dest, 'inventory': [{'food_type': str(k), 'amount': v} for k, v in self.amounts.items()]}
+
+    def __lt__(self, other):
+        return self.request_id < other.request_id
+
+class FakeServer:
+    def __init__(self) -> None:
+        self.id_to_node = dict()
+        self.nodes = []
+        self.available_nid = 0
+        self.requests = [] #request
+        self.food_types = [FoodType(food_type=random.choice(ascii_lowercase), expiry_date=sorted([None if not x else x for x in random.sample(range(10), 2)], key=lambda x: x if x is not None else (0 if random.random() < 0.5 else math.inf))) for _ in range(3)]
+
+
+    def add_node(self, location, source=False):
+        new_node = Node(location, self.available_nid, source=source)
+        self.nodes.append(new_node)
+        self.id_to_node[self.available_nid] = new_node
+        self.available_nid += 1
+
+    def add_request(self, source_id, dest_id, amounts, flip=False):
+        not_used_id = 0
+        for req in self.requests:
+            if req.request_id + 1 not in self.requests:
+                not_used_id = req.request_id + 1
+                break
+        if not flip:
+            self.requests.append(Request(source_id, dest_id, amounts, not_used_id))
+        else:
+            self.requests.append(Request(dest_id, source_id, amounts, not_used_id))
+
+    def add_random_nodes(self, n_nodes):
+        node_clustering = 20
+        for _ in range(n_nodes):
+            self.add_node(list(np.rint(np.random.randn(2)*node_clustering/math.sqrt(2))), source=random.random() > 0.5)
+        
+    def add_random_requests(self, n_requests):
+        for _ in range(n_requests):
+            self.add_request((u := random.randint(1, self.available_nid - 1)), random.randint(0, u-1), dict([(food_type, random.randint(0, 3)) for food_type in self.food_types]), flip=random.random() > 0.5)
+            print(self.requests[-1].request_id)
+        
+server = FakeServer()
+server.add_random_nodes(10)
+
+#SERVER SIDE QUERIES
+#IMPLEMENT WHEN FUNCTIONAL
+
+def query_warehouse_id(warehouse_id):
+    return server.id_to_node[warehouse_id].json() #{'location', 'id', 'source'}
+
+def query_warehouse(query, warehouse_id) -> int:
+    return math.inf
+
+def query_requests() -> List:
+    return [request.request_id for request in server.requests] #should return list of ids
+
+def query_request_id(request_id) -> Dict:
+    print('QUERYING REQUEST_ID', request_id)
+    return server.requests[server.requests.index(request_id)].json() #{'source', 'dest', 'inventory': [{'food_type', 'amount'}]}
+
+def del_request_id(request_id):
+    server.requests.remove(request_id)
+
+
 NAMES = ['Warehouse', 'Restaurant']
 DIST_TYPE = 2 #2 norm or 1 norm
-class System:
-    def __init__(self, 
-        food_types=('a', 'b', 'c'), 
-        node_clustering=4, 
-        source_ratio=0.5, 
-        n_nodes=10,
-        initial_inventory=(2, 2, 2),
-        d_random=10) -> None:
 
-        self.food_types = food_types
-        self.node_clustering = node_clustering
-        self.n_nodes = n_nodes
+def dist_func(location1, location2):
+    return round(np.linalg.norm(np.array(location1) - np.array(location2), ord=DIST_TYPE))
+
+class System:
+    def __init__(self) -> None:
+        self.food_types = []
         self.nodes = [dict(), dict()] #sinks, sources
         self.count = [0, 0]
         #node generation
-        for _ in range(n_nodes):
-            S = random.random() < source_ratio
-            node = Node(np.rint(np.random.randn(2)*node_clustering/math.sqrt(2)), source=S, inventory=dict(zip(food_types, initial_inventory)))
-            self.nodes[S][f'{NAMES[S]} {self.count[S]}'] = node
-            self.count[S] += 1
+        # for i in range(n_nodes):
+        #     S = random.random() < source_ratio if source_ratio < 1 else i < source_ratio
+        #     node = Node(np.rint(np.random.randn(2)*node_clustering/math.sqrt(2)), source=S, inventory=dict(zip(food_types, initial_inventory)))
+        #     self.nodes[S][f'{NAMES[S]} {self.count[S]}'] = node
+        #     self.count[S] += 1
         
-        #construct dist matrix
+        
+        #defaults
         self.dist_matrix = defaultdict(lambda: defaultdict(lambda: math.inf))
-        self.combined_dict = {**self.nodes[0], **self.nodes[1]}
-        self.index_to_node = list(self.combined_dict.keys())
-        self.node_to_index = dict(zip(self.index_to_node, range(len(self.index_to_node))))
-
-        for from_i in range(n_nodes):
-            for to_i in range(from_i+1):
-                v = round(np.linalg.norm(self.combined_dict[self.index_to_node[from_i]].location - self.combined_dict[self.index_to_node[to_i]].location, ord=DIST_TYPE))
-                self.dist_matrix[from_i][to_i] = v
-                self.dist_matrix[to_i][from_i] = v
-                #trivial dist matrix
-                # self.dist_matrix[from_i][to_i] = 0 if from_i == to_i else 10
-                #probably use something like google distmatrix api to find dist irl
-        
-        # print(self.dist_matrix)
-
-        #will act as a priority queue
+        # self.combined_dict = {**self.nodes[0], **self.nodes[1]}
+        self.combined_dict = dict()
+        self.index_to_node = []
+        self.node_to_index = dict()
         self.requests = []
         self.cached = []
+        self.cached_requests = None
+        self.request_ids = []
+        self.id_to_request = dict()
+        self.n_nodes = 0
+        #construct dist matrix
+        # for from_i in range(n_nodes):
+        #     for to_i in range(from_i+1):
+        #         v = round(np.linalg.norm(self.combined_dict[self.index_to_node[from_i]].location - self.combined_dict[self.index_to_node[to_i]].location, ord=DIST_TYPE))
+        #         self.dist_matrix[from_i][to_i] = v
+        #         self.dist_matrix[to_i][from_i] = v
+        #         #trivial dist matrix
+        #         # self.dist_matrix[from_i][to_i] = 0 if from_i == to_i else 10
+        #         #probably use something like google distmatrix api to find dist irl
+
+    def add_node(self, location, server_id, source=False): #source is donor, sink is warehouse
+        print('ADDING NODE', server_id)
+        node = Node(location, server_id, source=source)
+        #updating name dicts and counts
+        S = int(source)
+        node_name = f'{NAMES[S]} {server_id}'
+        if node_name in self.index_to_node:
+            return self.node_to_index[node_name]
+        self.nodes[S][node_name] = node
+        self.combined_dict[node_name] = node
+        self.count[S] += 1
+        #updating conversions
+        self.index_to_node.append(node_name)
+        last = len(self.index_to_node) - 1
+        self.node_to_index[node_name] = last
+        #updating dist matrix
+        for index in range(len(self.index_to_node)):
+            self.dist_matrix[index][last] = (dist := dist_func(self.convert_to_node(index).location, location))
+            self.dist_matrix[last][index] = dist
+        self.n_nodes += 1
+        return last
+
+    def add_node_from_id(self, wid):
+        prop_dict = query_warehouse_id(wid)
+        return self.add_node(prop_dict['location'], wid, source=prop_dict['source'])
 
     def convert_to_index(self, x):
         if type(x) == str:
@@ -75,52 +224,87 @@ class System:
             return self.index_to_node[x]
         return x
 
-    def convert_to_node(self, x):
+    def convert_to_node(self, x) -> Node:
         return self.combined_dict[self.convert_to_str(x)]
 
-    def add_request(self, source, dest, amounts, priority=0): #maybe calculate priority based on combination of user inputted variable, expiry date, etc.. lower is more urgent        
+    def add_request(self, source, dest, amounts, request_id, priority=0): #maybe calculate priority based on combination of user inputted variable, expiry date, etc.. lower is more urgent        
         if source == dest:
             print('Invalid request, source == dest.')
             return 0
-        if not all([self.convert_to_node(source).inventory[k] >= v for k, v in amounts.items()]):
+        cur_inv = self.convert_to_node(source).get_inv(list(amounts.keys()))
+        if not all([cur_inv[k] >= v for k, v in amounts.items()]):
             print('Invalid request, not enough inventory.')
             return 0
-        heapq.heappush(self.requests, (priority, self.convert_to_index(source), self.convert_to_index(dest), ComparableCounter(amounts)))
+        # print('SYSTEM ADDING REQUEST WITH ID', request_id)
+        #creates request object and pushes it into queue
+        heapq.heappush(self.requests, (req := (priority, Request(self.convert_to_index(source), self.convert_to_index(dest), ComparableCounter(amounts), request_id))))
+        self.id_to_request[request_id] = req
         return 1
 
-    def plot_nodes(self):
-        for k, node in self.combined_dict.items():
-            # print(node.location.tolist())
-            plt.plot(*node.location.tolist(), 'bo')
-            if self.node_to_index[k] == 0:
-                plt.plot(*node.location.tolist(), 'ro')   
-    
-    def plot_path(self, route):
-        route_ids, _ = zip(*route[0])
-        # print(route_ids)
-        R_NODES = 0.3
-        points = [self.combined_dict[self.index_to_node[ids]].location for ids in route_ids]
-        [plt.arrow(points[i][0], points[i][1], (points[i+1] - points[i])[0]*(1-R_NODES/np.linalg.norm(points[i+1] - points[i])), (points[i+1] - points[i])[1]*(1-R_NODES/np.linalg.norm(points[i+1] - points[i])), length_includes_head=True, head_width=0.3) for i in range(len(points) - 1)]
-        # plt.plot(x, y)
+    def remove_request(self, request_id):
+        # print('SYSTEM REQUEST-ID TO REMOVE', request_id)
+        _, requests = zip(*self.requests)
+        del_request_id(request_id)
+        self.request_ids.remove(request_id)
+        # print('SYSTEM NEW IDS', self.request_ids)
+        del self.requests[requests.index(request_id)]
+        del self.id_to_request[request_id]
 
-    def recommend_requests(self, topn=10, cache=3, cur_location=0, remove=True):
+    def update_requests(self): #periodically fetch new requests from server
+        request_ids = query_requests()
+        # print('SYSTEM NEW REQUEST_IDS', request_ids)
+        unique_ids = set(request_ids)
+        unique_selfids = set(self.request_ids)
+        if unique_ids != unique_selfids:
+            new_requests = list(unique_ids - unique_selfids)
+            # print('SYSTEM New requests', new_requests)
+            removed_requests = list(unique_selfids - unique_ids)
+            # print('SYSTEM Removed requests', removed_requests)
+            conv_requests = [query_request_id(request_id) for request_id in new_requests]
+            location_ids = [(self.add_node_from_id(q['source']), self.add_node_from_id(q['dest'])) for q in conv_requests]
+            food_inventory = [dict([(FoodType.fromstr(inv_item['food_type']), inv_item['amount']) for inv_item in q['inventory']]) for q in conv_requests]
+            net_food_types = itertools.chain.from_iterable([inv.keys() for inv in food_inventory])
+            self.food_types.extend(set(net_food_types) - set(self.food_types))
+            res = [self.add_request(source, dest, amounts, request_id) for (source, dest), amounts, request_id in zip(location_ids, food_inventory, new_requests)]
+            [self.remove_request(request_id) for request_id in removed_requests]
+            if not all(res):
+                print("Warning: some requests could not be added due to errors.")
+            self.request_ids = request_ids # FIX LATER; CANT ADD ALL IDS SINCE SOME MIGHT HAVE ERRORED
+    # def plot_nodes(self):
+    #     for k, node in self.combined_dict.items():
+    #         # print(node.location.tolist())
+    #         plt.plot(*node.location.tolist(), 'bo')
+    #         if self.node_to_index[k] == 0:
+    #             plt.plot(*node.location.tolist(), 'ro')   
+    
+    # def plot_path(self, route):
+    #     route_ids, _ = zip(*route[0])
+    #     # print(route_ids)
+    #     R_NODES = 0.3
+    #     points = [self.combined_dict[self.index_to_node[ids]].location for ids in route_ids]
+    #     [plt.arrow(points[i][0], points[i][1], (points[i+1] - points[i])[0]*(1-R_NODES/np.linalg.norm(points[i+1] - points[i])), (points[i+1] - points[i])[1]*(1-R_NODES/np.linalg.norm(points[i+1] - points[i])), length_includes_head=True, head_width=0.3) for i in range(len(points) - 1)]
+    #     # plt.plot(x, y)
+
+    def recommend_requests(self, topn=10, cache=3, cur_location=0, remove=False, request_ids=None):
         #caches "cache" number of paths that are non intersecting; that way recommendations work in system with multiple drivers
         #assume cars can start anywhere? (maybe a later addition)
-        if self.cached:
+        fulfill = heapq.nsmallest(topn, self.requests) if request_ids is None else [self.id_to_request[rid] for rid in request_ids]
+        if self.cached and self.cached_requests == fulfill:
             if remove:
                 popped = self.cached.pop(0)
-                solved_reqs = popped[0][1]
-                qs = []
-                for _ in range(min(len(self.requests), topn)):
-                    v = heapq.heappop(self.requests)
-                    if v[1:-1] not in solved_reqs:
-                        qs.append(v)
-                [heapq.heappush(self.requests, x) for x in qs] #repush
+                # solved_reqs = popped[0][1]
+                # qs = []
+                # for _ in range(min(len(self.requests), topn)):
+                #     v = heapq.heappop(self.requests)
+                #     if v[1:-1] not in solved_reqs:
+                #         qs.append(v)
+                # [heapq.heappush(self.requests, x) for x in qs] #repush
                 return popped
             else:
                 return self.cached[0]
-        fulfill = heapq.nsmallest(topn, self.requests)
-        print(fulfill)
+
+        # sorted_req = sorted(self.requests)
+        #default to taking topn requests if no indices provided
         if not fulfill:
             print('No requests')
             return None, None
@@ -158,15 +342,20 @@ class System:
 
         tups = []
         occured = set()
-        for _, *tup, amount in fulfill:
-            index, tup_new1 = assignment_helper(tup[0], index)
-            index, tup_new2 = assignment_helper(tup[1], index)
+        for _, req in fulfill:
+            index, tup_new1 = assignment_helper(req.source, index)
+            index, tup_new2 = assignment_helper(req.dest, index)
+            print('FOR REQUEST BETWEEN', req.source, req.dest)
+            print(tup_new1)
+            print(tup_new2)
             occured.add(tup_new1)
             occured.add(tup_new2)
-            tups.append((tup_new1, tup_new2, amount))
-        print('TUPS', tups)
+            tups.append((tup_new1, tup_new2, req.amounts))
+
+        # print('TUPS', tups)
         print('FINAL INDEX', index)
         print('ASSIGNMENTS', node_to_assignments)
+        print('PARENT NODE', assignment_to_node)
         print('OCCURENCES', occured)
         print('\n'.join([' '.join([str(augmented_dist_matrix[i][j]) for j in range(index)]) for i in range(index)]))
         # print(any([augmented_dist_matrix[i][j] == math.inf for i in range(index) for j in range(index)]))
@@ -220,7 +409,7 @@ class System:
             routing.solver().Add(
                 distance_dimension.CumulVar(pickup_index) <=
                 distance_dimension.CumulVar(delivery_index))
-
+        # print('TRIMMED REQUESTS', trimmed_requests)
         # print('GOT HERE')
         # print(pywrapcp.DefaultRoutingSearchParameters())
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
@@ -253,8 +442,10 @@ class System:
                     satisfied_requests[v_id].append((assignment_to_node[N], assignment_to_node[trimmed_requests[N][0]]))
                 
                 if len(routes[v_id]) == 0 or assignment_to_node[N] != routes[v_id][-1][0]:
-                    routes[v_id].append([assignment_to_node[N], trimmed_requests[N][1]])
+                    # print('TUP', N, assignment_to_node[N], list(trimmed_requests[N][1].values()))
+                    routes[v_id].append([assignment_to_node[N], trimmed_requests[N][1].copy()])
                 else:
+                    # print('TUP', N, assignment_to_node[N], list(trimmed_requests[N][1].values()))
                     routes[v_id][-1][1].update(trimmed_requests[N][1])
                 # print(routing.NextVar(idx))
                 last_node = N
@@ -268,32 +459,37 @@ class System:
                 routes[v_id][-1][1].update(trimmed_requests[N][1])
             routes[v_id] = [routes[v_id][0]] + list(filter(lambda x: any(x[1].values()), routes[v_id][1:-1])) + [routes[v_id][-1]] 
             distances[v_id] = dist
+            # print('VEHICLE CHANGE -----')
         # print(satisfied_requests)
         routes = list(zip(routes, satisfied_requests))
         print('ROUTES', [list(zip(*routes[i][0]))[0] for i in range(cache)])
         routes = list(filter(lambda x: len(x[0]) > 2, routes))
+
+        self.cached = list(zip(routes, distances))
+        self.cached_requests = fulfill
         if remove:
-            self.cached = list(zip(routes[1:], distances[1:]))
-            # print(routes[0])
-            solved_reqs = routes[0][1]
-            qs = []
-            for _ in range(min(topn, len(self.requests))):
-                v = heapq.heappop(self.requests)
-                if v[1:-1] not in solved_reqs:
-                    qs.append(v)
-            [heapq.heappush(self.requests, x) for x in qs] #repush
+            self.cached = self.cached[1:]
+            # # print(routes[0])
+            # solved_reqs = routes[0][1]
+            # qs = []
+            # for _ in range(min(topn, len(self.requests))):
+            #     v = heapq.heappop(self.requests)
+            #     if v[1:-1] not in solved_reqs:
+            #         qs.append(v)
+            # [heapq.heappush(self.requests, x) for x in qs] #repush
         return routes[0], distances[0]
 
     def print_route_information(self, x):
         s = ''
         if not x:
             return s
-        print(x)
+        # print(x)
         for i, tup in enumerate(x[0]):
-            print(tup)
+            # print('TUPLES', tup)
+            # print('NODE INDEX', tup[0])
             s += f"{'Start at' if i == 0 else 'Goto'} {self.index_to_node[tup[0]]}.\n"
             if len(tup[1]) > 0:
-                s += '\n'.join([f"{'Pickup' if amt > 0 else 'Dropoff'} {abs(amt)} units of {k}." for k, amt in tup[1].items() if amt != 0])
+                s += '\n'.join([f"{'Pickup' if amt > 0 else 'Dropoff'} {abs(amt)} units of {k.readable()}." for k, amt in tup[1].items() if amt != 0])
                 s += '\n'
         return s
             
@@ -302,8 +498,54 @@ class System:
         sortedreq = sorted(self.requests)
         print(sortedreq)
         for i in range(len(self.requests)):
-            amount_s = '\n'.join([f'Amount of {food}: {sortedreq[i][3][food]}' for food in self.food_types])
+            amount_s = '\n'.join([f'Amount of {str(food)}: {sortedreq[i][3][food]}' for food in self.food_types])
             s += f"Source: {self.convert_to_str(sortedreq[i][1])}\nDest: {self.convert_to_str(sortedreq[i][2])}\nAmounts:\n{amount_s}\n"
         s += '\n'
         return s
+
+
+AVG_SPEED = 10
+STD_SPEED = 1
+LOADING_PAUSE = 10
+PAUSE_STD = 1
+class DeliveryDriver:
+    def __init__(self, system : System, path) -> None:
+        self.progress = 0
+        self.cur_path = path
+        self.distance = system.dist_matrix[path[0][0]][path[1][0]]
+        self.cur_time = 0
+        self.speeds = []
+        self.system = system
+        self.pause = random.gauss(LOADING_PAUSE, PAUSE_STD)
+        
+    def update(self):
+        if self.pause > 0:
+            self.pause -= 1
+            return 0
             
+        self.progress += (speed := random.gauss(AVG_SPEED, STD_SPEED))
+        
+        if self.progress >= self.distance:
+            completed = self.cur_path.pop(0)
+            if len(self.cur_path) <= 1:
+                print(f'Completed all deliveries in path.')
+                return 1
+            self.distance = self.system.dist_matrix[self.cur_path[0][0]][self.cur_path[1][0]]
+            self.progress = 0
+            self.speeds = []
+            self.pause = random.gauss(LOADING_PAUSE, PAUSE_STD)
+            print(f'Completed delivery from {completed[0]} to {self.cur_path[0][0]}')
+            return -1
+        
+        self.speeds.append(speed)
+        self.cur_time += 1
+        return 0
+
+    def get_eta(self):
+        THRESHOLD = 3
+        avg = np.mean(self.speeds) if len(self.speeds) != 0 else AVG_SPEED
+        std = np.std(self.speeds) if len(self.speeds) > THRESHOLD else AVG_SPEED/2
+        return [self.cur_time + (self.distance - self.progress)/(avg + sign*std) for sign in [1, -1]] 
+
+    
+    
