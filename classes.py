@@ -285,6 +285,20 @@ class System:
     #     [plt.arrow(points[i][0], points[i][1], (points[i+1] - points[i])[0]*(1-R_NODES/np.linalg.norm(points[i+1] - points[i])), (points[i+1] - points[i])[1]*(1-R_NODES/np.linalg.norm(points[i+1] - points[i])), length_includes_head=True, head_width=0.3) for i in range(len(points) - 1)]
     #     # plt.plot(x, y)
 
+    def satisfy_path(self, idx):
+        solved_reqs = self.cached[idx][0][1]
+        removed_requests = []
+        for i, (_, request) in enumerate(self.cached_requests):
+            print(request)
+            if (request.source, request.dest) in solved_reqs:
+                self.remove_request(request.request_id)
+                removed_requests.append(i)
+        for i in removed_requests[::-1]:
+            del self.cached_requests[i]
+            # pass
+        del self.cached[idx]
+
+
     def recommend_requests(self, topn=10, cache=3, cur_location=0, remove=False, request_ids=None):
         #caches "cache" number of paths that are non intersecting; that way recommendations work in system with multiple drivers
         #assume cars can start anywhere? (maybe a later addition)

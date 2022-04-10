@@ -2,7 +2,7 @@ import dearpygui.dearpygui as dpg
 import itertools
 
 TOTAL_FONTS = set()
-COLORS = {'white': (236, 239, 241, 0), 'green': (46, 125, 50, 200)}
+COLORS = {'white': (236, 239, 241, 0), 'bluegrey': (104, 159, 56,100)}
 THEMES = set()
 
 def hsv_to_rgb(h, s, v):
@@ -23,12 +23,14 @@ def load_image(image_name, tag):
         dpg.add_static_texture(width, height, data, tag=tag)
 
 def set_font(item, size, bold=False):
-    if all([st not in dpg.get_item_type(item) for st in ['mvText', 'mvButton']]):
+    if dpg.is_item_container(item):
         for children in [x for x in itertools.chain.from_iterable(dpg.get_item_children(item).values()) if 'mvText' in dpg.get_item_type(x)]:
             set_font(children, size, bold=bold)
     name = f'{"bold" if bold else "regular"}{size}'
     if name not in TOTAL_FONTS:
-        dpg.add_font(f'Roboto/Roboto-{"Bold" if bold else "Regular"}.ttf', size, parent='font_registry', tag=name)
+        # dpg.add_font(f'Roboto/Roboto-{"Bold" if bold else "Regular"}.ttf', size, parent='font_registry', tag=name)
+        dpg.add_font(f'Proxima/Proxima Nova {"Bold" if bold else "Reg"}.ttf', size, parent='font_registry', tag=name)
+        # dpg.add_font(f'FontsFree-Net-proxima_nova_reg-webfont.ttf', size, parent='font_registry', tag=name)
         TOTAL_FONTS.add(name)
     dpg.bind_item_font(item, name)
 
