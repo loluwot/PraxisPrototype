@@ -56,7 +56,7 @@ class RequestHandler:
     def select_path_callback(self, sender, app_data, user_data):
         self.system.satisfy_path(user_data)
         print(self.selected_requests)
-        # self.update_paths() <TAG SO UNCOMMENTING IS EASIER>
+        self.update_paths()
         self.update_requests()
         # self.selected_requests = []
         self.highlight_update()
@@ -90,8 +90,8 @@ class RequestHandler:
                 set_font(dpg.last_item(), 13, bold=True)
                 dpg.add_text(f'{dist:.2f}km')
             self.draw_route(route, i, parent=f'pathdisplay{i}', before=f'pathbutton{i}')
-        self.clear_canvas()
-        self.draw_graph(parent='graph_canvas')
+        # self.clear_canvas()
+        # self.draw_graph(parent='graph_canvas')
 
         # dpg.delete_item('graph_canvas')
 
@@ -103,7 +103,7 @@ class RequestHandler:
         temp = dpg.add_loading_indicator(parent='path_window')
         self.system.recommend_requests(request_ids=[self.row_to_id[i] for i in self.selected_requests], cache=N_OPTIONS)
         # print('ROUTE', a)
-        # self.update_paths() <TAG SO UNCOMMENT IS EASIER>
+        self.update_paths()
         dpg.delete_item(temp)
         # for i in range(N_OPTIONS):
         #     dpg.configure_item(f'pathdisplay{i}', show=False)
