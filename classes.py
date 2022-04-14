@@ -11,8 +11,20 @@ import json
 import itertools
 import re
 from string import ascii_lowercase
-from helpers import format_helper
 
+# from torch import R
+from helpers import format_helper
+import networkx as nx
+import matplotlib.pyplot as plt
+import requests
+from urllib.parse import quote_plus
+import googlemaps
+
+DISTMATRIX_APIKEY = 'AIzaSyC_SpwD0cp9H7IoY5Pnnl6dTDqkispU6E0'
+# STATICMAPS_APIKEY = 'AIzaSyCPa7ywj1-5mj08sfVJTLsEjtwDnJYaviQ'
+CLIENT = googlemaps.Client(DISTMATRIX_APIKEY)
+# CLIENT2 = googlemaps.Client(STATICMAPS_APIKEY)
+GOOGLE_API_LINK = 'https://maps.googleapis.com/maps/api/distancematrix/json?units=metric&origins={}&destinations={}&key={}'
 
 class ComparableCounter(Counter):
     def __lt__(self, other):
@@ -28,7 +40,7 @@ class FoodType:
         for k, v in args.items():
             setattr(self, k, v)
         self.rawargs = args
-        self.filters = dict([(k, str(v)) for k, v in args.items()])
+        # self.filters = dict([(k, str(v)) for k, v in args.items()])
 
     def __str__(self) -> str:
         return json.dumps(self.rawargs)
@@ -51,10 +63,15 @@ class FoodType:
         return ', '.join(list(zip(*self.readable_raw()))[1])
 
 class Node:
-    def __init__(self, location, server_id, source=False) -> None:
-        self.location = location
-        self.server_id = server_id
-        self.source = source
+    def __init__(self, **args) -> None:
+        # self.location = location
+        # self.server_id = server_id
+        # self.source = source
+        # self.name = name
+        for k, v in args.items():
+            setattr(self, k, v)
+            
+        # print(args)
         # if not source:
         #     self.inventory = defaultdict(lambda: 0) if inventory is None else defaultdict(lambda: 0, inventory)
         # else:
@@ -64,13 +81,13 @@ class Node:
         return dict(zip(food_types, [query_warehouse(str(food_type), self.server_id) for food_type in food_types]))
 
     def __hash__(self) -> int:
-        return hash(self.location) + hash(self.server_id) + int(self.source)
+        return hash(self.server_id)
 
     def __eq__(self, __o: object) -> bool:
         return hash(self) == hash(__o)
 
     def json(self):
-        return {'location': self.location, 'id': self.server_id, 'source': self.source}
+        return {'location': self.location, 'id': self.server_id, 'source': self.source, 'name': self.name}
 
 class Request:
     def __init__(self, source, dest, amounts, request_id) -> None:
@@ -96,9 +113,8 @@ class FakeServer:
         self.requests = [] #request
         self.food_types = [FoodType(food_type=random.choice(ascii_lowercase), expiry_date=sorted([None if not x else x for x in random.sample(range(10), 2)], key=lambda x: x if x is not None else (0 if random.random() < 0.5 else math.inf))) for _ in range(3)]
 
-
     def add_node(self, location, source=False):
-        new_node = Node(location, self.available_nid, source=source)
+        new_node = Node(location=location, server_id=self.available_nid, source=source, name=f'TEST NAME {self.available_nid}')
         self.nodes.append(new_node)
         self.id_to_node[self.available_nid] = new_node
         self.available_nid += 1
@@ -125,33 +141,59 @@ class FakeServer:
             print(self.requests[-1].request_id)
         
 server = FakeServer()
-server.add_random_nodes(10)
+server.add_random_nodes(6)
 
+SERVER_URL = 'https://ajwmagnuson.pythonanywhere.com/extdata/'
 #SERVER SIDE QUERIES
 #IMPLEMENT WHEN FUNCTIONAL
 
 def query_warehouse_id(warehouse_id):
-    return server.id_to_node[warehouse_id].json() #{'location', 'id', 'source'}
+    # return server.id_to_node[warehouse_id].json() #{'location', 'id', 'source'}
+    res = requests.get(SERVER_URL, {'q': 'get_location', 'id': warehouse_id})
+    return res.json()
 
 def query_warehouse(query, warehouse_id) -> int:
     return math.inf
 
 def query_requests() -> List:
-    return [request.request_id for request in server.requests] #should return list of ids
+    res = requests.get(SERVER_URL, {'q': 'get_requests'})
+    return [req['pk'] for req in res.json()]
+    # return [request.request_id for request in server.requests] #should return list of ids
 
 def query_request_id(request_id) -> Dict:
-    print('QUERYING REQUEST_ID', request_id)
-    return server.requests[server.requests.index(request_id)].json() #{'source', 'dest', 'inventory': [{'food_type', 'amount'}]}
+    # print('QUERYING REQUEST_ID', request_id)
+    # return server.requests[server.requests.index(request_id)].json() #{'source', 'dest', 'inventory': [{'food_type', 'amount'}]}
+
+    res = requests.get(SERVER_URL, {'q': 'get_request', 'id': request_id})
+    return res.json()
 
 def del_request_id(request_id):
-    server.requests.remove(request_id)
+    pass
+    # server.requests.remove(request_id)
 
+def get_nodes() -> List:
+    res = requests.get(SERVER_URL, {'q': 'get_locations'})
+    return [req['pk'] for req in res.json()]
 
 NAMES = ['Warehouse', 'Restaurant']
 DIST_TYPE = 2 #2 norm or 1 norm
 
 def dist_func(location1, location2):
-    return round(np.linalg.norm(np.array(location1) - np.array(location2), ord=DIST_TYPE))
+    if location1 == location2:
+        return 0
+    # print(location1)
+    # print(location2)
+    # res = requests.get(GOOGLE_API_LINK.format(quote_plus(location1 + ' ON'), quote_plus(location2 + ' ON'), DISTMATRIX_APIKEY))
+    # # print(res.json())
+    # return res.json()['rows'][0]['elements'][0]['distance']['value']/1000
+
+    origins = [location1 + ' ON']
+    destinations = [location2 + ' ON']
+    matrix = CLIENT.distance_matrix(origins, destinations)
+    return matrix['rows'][0]['elements'][0]['distance']['value']/1000
+
+    # return 
+    # return round(np.linalg.norm(np.array(list(map(float, location1))) - np.array(list(map(float, location2))), ord=DIST_TYPE))
 
 class System:
     def __init__(self) -> None:
@@ -164,8 +206,7 @@ class System:
         #     node = Node(np.rint(np.random.randn(2)*node_clustering/math.sqrt(2)), source=S, inventory=dict(zip(food_types, initial_inventory)))
         #     self.nodes[S][f'{NAMES[S]} {self.count[S]}'] = node
         #     self.count[S] += 1
-        
-        
+    
         #defaults
         self.dist_matrix = defaultdict(lambda: defaultdict(lambda: math.inf))
         # self.combined_dict = {**self.nodes[0], **self.nodes[1]}
@@ -178,6 +219,11 @@ class System:
         self.request_ids = []
         self.id_to_request = dict()
         self.n_nodes = 0
+        self.cache_graph = nx.Graph()
+
+        starting_nodes = get_nodes()
+        for node in starting_nodes:
+            self.add_node_from_id(node)
         #construct dist matrix
         # for from_i in range(n_nodes):
         #     for to_i in range(from_i+1):
@@ -188,12 +234,12 @@ class System:
         #         # self.dist_matrix[from_i][to_i] = 0 if from_i == to_i else 10
         #         #probably use something like google distmatrix api to find dist irl
 
-    def add_node(self, location, server_id, source=False): #source is donor, sink is warehouse
-        print('ADDING NODE', server_id)
-        node = Node(location, server_id, source=source)
+    def add_node(self, **args): #source is donor, sink is warehouse
+        # print('ADDING NODE', server_id)
+        node = Node(**args)
         #updating name dicts and counts
-        S = int(source)
-        node_name = f'{NAMES[S]} {server_id}'
+        S = int(args['source'])
+        node_name = f'{NAMES[S]} {args["server_id"]}' if 'name' not in args else args['name']
         if node_name in self.index_to_node:
             return self.node_to_index[node_name]
         self.nodes[S][node_name] = node
@@ -205,14 +251,19 @@ class System:
         self.node_to_index[node_name] = last
         #updating dist matrix
         for index in range(len(self.index_to_node)):
-            self.dist_matrix[index][last] = (dist := dist_func(self.convert_to_node(index).location, location))
+            # self.dist_matrix[index][last] = (dist := dist_func(self.convert_tos_node(index).location, args['location']))
+            self.dist_matrix[index][last] = (dist := dist_func(self.convert_to_node(index).address, args['address']))
             self.dist_matrix[last][index] = dist
         self.n_nodes += 1
+        self.cache_graph.add_node(node_name)
+        for x in self.cache_graph.nodes():
+            if x != node_name:
+                self.cache_graph.add_edge(node_name, x)
         return last
 
     def add_node_from_id(self, wid):
         prop_dict = query_warehouse_id(wid)
-        return self.add_node(prop_dict['location'], wid, source=prop_dict['source'])
+        return self.add_node(**prop_dict, server_id=wid) #assume it at least has name, location and source
 
     def convert_to_index(self, x):
         if type(x) == str:
@@ -262,7 +313,7 @@ class System:
             # print('SYSTEM Removed requests', removed_requests)
             conv_requests = [query_request_id(request_id) for request_id in new_requests]
             location_ids = [(self.add_node_from_id(q['source']), self.add_node_from_id(q['dest'])) for q in conv_requests]
-            food_inventory = [dict([(FoodType.fromstr(inv_item['food_type']), inv_item['amount']) for inv_item in q['inventory']]) for q in conv_requests]
+            food_inventory = [dict([(FoodType.fromstr(json.dumps({'food_type':inv_item['name'], 'expiry_date': inv_item['expiry_date']})), inv_item['amount']) for inv_item in q['inventory']]) for q in conv_requests]
             net_food_types = itertools.chain.from_iterable([inv.keys() for inv in food_inventory])
             self.food_types.extend(set(net_food_types) - set(self.food_types))
             res = [self.add_request(source, dest, amounts, request_id) for (source, dest), amounts, request_id in zip(location_ids, food_inventory, new_requests)]
@@ -288,8 +339,14 @@ class System:
     def satisfy_path(self, idx):
         solved_reqs = self.cached[idx][0][1]
         removed_requests = []
+        route = self.cached[idx][0][0]
+        # for i in range(len(route) - 1):
+        #     try:
+        #         self.cache_graph.remove_edge(self.convert_to_str(route[i][0]), self.convert_to_str(route[i+1][0]))
+        #     except nx.NetworkXError:
+        #         pass
         for i, (_, request) in enumerate(self.cached_requests):
-            print(request)
+            # print(request)
             if (request.source, request.dest) in solved_reqs:
                 self.remove_request(request.request_id)
                 removed_requests.append(i)
@@ -304,24 +361,14 @@ class System:
         #assume cars can start anywhere? (maybe a later addition)
         fulfill = heapq.nsmallest(topn, self.requests) if request_ids is None else [self.id_to_request[rid] for rid in request_ids]
         if self.cached and self.cached_requests == fulfill:
-            if remove:
-                popped = self.cached.pop(0)
-                # solved_reqs = popped[0][1]
-                # qs = []
-                # for _ in range(min(len(self.requests), topn)):
-                #     v = heapq.heappop(self.requests)
-                #     if v[1:-1] not in solved_reqs:
-                #         qs.append(v)
-                # [heapq.heappush(self.requests, x) for x in qs] #repush
-                return popped
-            else:
-                return self.cached[0]
+            return self.cached[0]
 
         # sorted_req = sorted(self.requests)
         #default to taking topn requests if no indices provided
         if not fulfill:
             print('No requests')
             return None, None
+
         #or tools stuff
         index = self.n_nodes
         assignment_to_node = dict([(i, i) for i in range(self.n_nodes)]) 
@@ -477,20 +524,14 @@ class System:
         # print(satisfied_requests)
         routes = list(zip(routes, satisfied_requests))
         print('ROUTES', [list(zip(*routes[i][0]))[0] for i in range(cache)])
+        # for route in [list(zip(*routes[i][0]))[0] for i in range(cache)]:
+        #     for i in range(len(route) - 1):
+        #         self.cache_graph.add_edge(self.convert_to_str(route[i]), self.convert_to_str(route[i+1]))
+        
         routes = list(filter(lambda x: len(x[0]) > 2, routes))
-
         self.cached = list(zip(routes, distances))
         self.cached_requests = fulfill
-        if remove:
-            self.cached = self.cached[1:]
-            # # print(routes[0])
-            # solved_reqs = routes[0][1]
-            # qs = []
-            # for _ in range(min(topn, len(self.requests))):
-            #     v = heapq.heappop(self.requests)
-            #     if v[1:-1] not in solved_reqs:
-            #         qs.append(v)
-            # [heapq.heappush(self.requests, x) for x in qs] #repush
+    
         return routes[0], distances[0]
 
     def print_route_information(self, x):
@@ -501,10 +542,22 @@ class System:
         for i, tup in enumerate(x[0]):
             # print('TUPLES', tup)
             # print('NODE INDEX', tup[0])
-            s += f"{'Start at' if i == 0 else 'Goto'} {self.index_to_node[tup[0]]}.\n"
+            s += f"{'Start at' if i == 0 else 'Go to'} {self.index_to_node[tup[0]]}.\n"
             if len(tup[1]) > 0:
-                s += '\n'.join([f"{'Pickup' if amt > 0 else 'Dropoff'} {abs(amt)} units of {k.readable()}." for k, amt in tup[1].items() if amt != 0])
+                s += '\n'.join([f"{'Pickup' if amt > 0 else 'Dropoff'} " +  f"{abs(amt)} kg units of {k.readable()}." for k, amt in tup[1].items() if amt != 0])
                 s += '\n'
+        return s
+
+    def raw_route_info(self, x):
+        s = []
+        if not x:
+            return s
+        for i, tup in enumerate(x[0]):
+            # print('TUPLES', tup)
+            # print('NODE INDEX', tup[0])
+            s.append((f"{'Start at' if i == 0 else 'Go to'} {self.index_to_node[tup[0]]}.", ))
+            if len(tup[1]) > 0:
+                s.extend([(f"{'Pickup' if amt > 0 else 'Dropoff'} {abs(amt)} kg of {{{k.food_type}}}.", k) for k, amt in tup[1].items() if amt != 0])
         return s
             
     def print_requests(self):
@@ -512,11 +565,14 @@ class System:
         sortedreq = sorted(self.requests)
         print(sortedreq)
         for i in range(len(self.requests)):
-            amount_s = '\n'.join([f'Amount of {str(food)}: {sortedreq[i][3][food]}' for food in self.food_types])
+            amount_s = '\n'.join([f'Amount of {str(food)}: {sortedreq[i][3][food]} kg' for food in self.food_types])
             s += f"Source: {self.convert_to_str(sortedreq[i][1])}\nDest: {self.convert_to_str(sortedreq[i][2])}\nAmounts:\n{amount_s}\n"
         s += '\n'
         return s
 
+    def display_graph(self):
+        nx.draw(self.cache_graph)
+        plt.show()
 
 AVG_SPEED = 10
 STD_SPEED = 1
