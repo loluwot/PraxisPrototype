@@ -103,7 +103,7 @@ class RequestHandler:
         temp = dpg.add_loading_indicator(parent='path_window')
         self.system.recommend_requests(request_ids=[self.row_to_id[i] for i in self.selected_requests], cache=N_OPTIONS)
         # print('ROUTE', a)
-        self.update_paths()
+        # self.update_paths() <TAG SO UNCOMMENT IS EASIER>
         dpg.delete_item(temp)
         # for i in range(N_OPTIONS):
         #     dpg.configure_item(f'pathdisplay{i}', show=False)
