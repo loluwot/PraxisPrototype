@@ -1,5 +1,4 @@
 import requests
-import openfoodfacts
 
 LINK = 'https://api.edamam.com/api/food-database/v2/'
 APP_ID = 'f62e12b4'
@@ -19,6 +18,7 @@ def labels_from_food(name):
     # print(res.json())
     return set(res.json()['healthLabels']) & FILTERED_LIST
 
+import openfoodfacts
 def barcode_to_labels(barcode):
     product = openfoodfacts.products.get_product(str(barcode))
     return labels_from_food(product['product']['product_name'])

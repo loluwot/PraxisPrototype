@@ -1,4 +1,5 @@
 from os import remove
+import sys
 import dearpygui.dearpygui as dpg
 from string import ascii_uppercase, ascii_lowercase
 import random
@@ -11,13 +12,16 @@ from helpers import ATTRIBUTE_TO_IMAGE, embed_graph, normalize, perp_vector
 from gui_helpers import *
 from googlemaps.maps import StaticMapMarker
 from googlemaps.maps import StaticMapPath
+from dearpygui_ext import themes
 
-food_types = [FoodType(food_type=random.choice(ascii_lowercase), expiry_date=sorted([None if not x else x for x in random.sample(range(10), 2)], key=lambda x: x if x is not None else (0 if random.random() < 0.5 else math.inf))) for _ in range(3)]
+INVERT = True
+N_OPTIONS = 3
+
+# food_types = [FoodType(food_type=random.choice(ascii_lowercase), expiry_date=sorted([None if not x else x for x in random.sample(range(10), 2)], key=lambda x: x if x is not None else (0 if random.random() < 0.5 else math.inf))) for _ in range(3)]
 # print([food_type.readable() for food_type in food_types])
-n_requests = 30
+# n_requests = 30
 # ex_requests = [Request((used:=random.choice(ascii_uppercase)), random.choice(list(set(ascii_uppercase) - set(used))), dict([(food_type, randint(0, 3)) for food_type in food_types]), rid) for rid in range(n_requests)]
 # selected_requests = []
-N_OPTIONS = 3
 
 class RequestHandler:
     def __init__(self, system) -> None:
@@ -35,7 +39,6 @@ class RequestHandler:
         # item_name = sender.replace('checkbox', 'grouped')
         item_id = int(sender.replace('checkbox', ''))
         # set_color(item_name, list(COLORS.keys())[int(app_data)])
-        print('callback due to checkbox')
         # dpg.highlight_table_row('request_table', self.rows.index(item_id) + 1, list(COLORS.values())[int(app_data)])
         if app_data:
             self.selected_requests.append(item_id)
@@ -48,6 +51,7 @@ class RequestHandler:
     def highlight_update(self):
         # [dpg.highlight_table_row('request_table', self.rows.index(item_id) + 1, list(COLORS.values())[1]) for item_id in self.selected_requests]
         pass
+    
     def checkall_callback(self, sender, app_data):
         for idx in self.rows:
             dpg.set_value(f'checkbox{idx}', app_data)
@@ -83,6 +87,7 @@ class RequestHandler:
                     res = format_tooltip(text, parent=f'pathdetailed{i}')
                     with res[k.food_type]:
                         display_details(k)
+                    # res = format_handler(text, )
                 else:
                     dpg.add_text(tup[0], parent=f'pathdetailed{i}', bullet=True)
             with dpg.group(horizontal=True, parent=f'pathdetailed{i}'):
@@ -121,12 +126,12 @@ class RequestHandler:
         print('USER DATA', app_data)
         # item_name = app_data[1].replace('grouped', 'detailed')
         item_name = app_data[1].replace(n1, n2)
-        print('ITEM NAME', item_name)
+        # print('ITEM NAME', item_name)
         if not hasattr(self, n1):
             setattr(self, n1, defaultdict(lambda : False))
         if not app_data[0]:
             getattr(self, n1)[item_name] = not getattr(self, n1)[item_name]
-        print('FLIP', getattr(self, n1)[item_name])
+        # print('FLIP', getattr(self, n1)[item_name])
         dpg.configure_item(item_name, show=getattr(self, n1)[item_name])
 
     def create_request_box(self, request, i, parent=None):
@@ -137,7 +142,6 @@ class RequestHandler:
         # dest = request.dest
         amounts = request.amounts
         rid = request.request_id
-
         self.id_to_row[rid] = i
         self.row_to_id[i] = rid
         default_args = {'tag': f'row{i}', 'filter_key': f'{source} to {dest}'}
@@ -193,8 +197,13 @@ class RequestHandler:
         remove_ids = set(self.row_to_id.values()) - set(self.system.request_ids)
         # print('GUI UPDATE ADD', add_ids)
         # print('GUI UPDATE REMOVE', remove_ids)
-        [self.add_request(self.system.id_to_request[rid]) for rid in add_ids]
-        [self.remove_request(rid) for rid in remove_ids] 
+        try:
+            [self.add_request(self.system.id_to_request[rid]) for rid in add_ids]
+            [self.remove_request(rid) for rid in remove_ids] 
+        except KeyboardInterrupt:
+            sys.exit(0)
+        except:
+            pass
 
     def add_request(self, request):
         new_idx = 0
@@ -208,7 +217,7 @@ class RequestHandler:
     def remove_request(self, i, from_self=False):
         if not from_self:
             i = self.id_to_row[i]
-        print('ROW ID REMOVED', i)
+        # print('ROW ID REMOVED', i )
         self.selected_requests.remove(i)
         # print(self.rows)
         dpg.delete_item(f'row{i}')
@@ -232,7 +241,6 @@ class RequestHandler:
         midpoint = np.array([sum([edge[j][i] for j in range(2)])/2 for i in range(2)])
         vector = [edge[1][i] - edge[0][i] for i in range(2)]
         perp = np.array(perp_vector(vector))
-
         start = midpoint - perp*width/2
         step_vec = perp*width/(num + 1)
         start += step_vec
@@ -311,20 +319,21 @@ class RequestHandler:
                 dpg.add_theme_color(dpg.mvThemeCol_TableRowBgAlt, (255, 255, 255), category=dpg.mvThemeCat_Core)
                 # dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, 0, category=dpg.mvThemeCat_Core)
         
-        with dpg.theme(tag="button_theme"):
-            with dpg.theme_component(dpg.mvButton):
-                dpg.add_theme_color(dpg.mvThemeCol_Button, hsv_to_rgb(4/7.0, 0.6, 0.4))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, hsv_to_rgb(4/7.0, 0.8, 0.6))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, hsv_to_rgb(4/7.0, 0.7, 0.5))
-                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, 5)
-                dpg.add_theme_style(dpg.mvStyleVar_FramePadding, 3, 3)
-        dpg.bind_theme('button_theme')
-        # dpg.bind_theme(theme)
-
-        load_image('request_icon.png', 'r_icon')
-        load_image('apple.png', 'apple')
-        load_image('date.png', 'date')
-        load_image('amount.png', 'amount')
+        # with dpg.theme(tag="button_theme"):
+        with dpg.theme_component(dpg.mvButton, parent=light_theme):
+            # dpg.add_theme_color(dpg.mvThemeCol_Button, hsv_to_rgb(4/7.0, 0.6, 0.4))
+            # dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, hsv_to_rgb(4/7.0, 0.8, 0.6))
+            # dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, hsv_to_rgb(4/7.0, 0.7, 0.5))
+            dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, 5)
+            dpg.add_theme_style(dpg.mvStyleVar_FramePadding, 3, 3)
+        
+        dpg.bind_theme(light_theme)
+        # dpg.bind_theme('button_theme')
+        
+        # load_image(f'request_icon{"_invert" if INVERT else ""}.png', 'r_icon')
+        load_image(f'apple{"_invert" if INVERT else ""}.png', 'apple')
+        load_image(f'date{"_invert" if INVERT else ""}.png', 'date')
+        load_image(f'amount{"_invert" if INVERT else ""}.png', 'amount')
 
         with dpg.window(label="Requests Display", autosize=True, width=500, tag='request_window'):
             dpg.add_input_text(label="Filter (inc, -exc)", user_data='request_table', callback=self.filter_callback)
@@ -359,6 +368,7 @@ class RequestHandler:
                                 set_font(f'pathbutton{idx}', 15)
                                 # dpg.bind_item_handler_registry(f"pathname{idx}", "whandler2")
                         # dpg.add_separator()
+                        
         # with dpg.window(label='Bird\'s Eye View', height=400, width=400, pos=(500, 300), no_close=True, tag='delivery_window'):
         #     with dpg.drawlist(width=300, height=300, tag='graph_canvas'):
         #         # print(self.system.cache_graph)
@@ -368,9 +378,13 @@ class RequestHandler:
         #         self.clear_canvas()
         #         self.draw_graph()
 
+
 dpg.create_context()
 dpg.add_font_registry(tag='font_registry')
 dpg.create_viewport(title='RN4402 Feed it Forward Prototype', x_pos = 0, y_pos = 0)
+# print(help(dpgext))
+
+dpg.add_item_handler_registry(tag="whandler")
 
 class FakeSystem:
     def __init__(self, requests) -> None:
@@ -380,11 +394,13 @@ class FakeSystem:
         print(self.requests)
         self.requests.remove(rid)
 
+light_theme = themes.create_theme_imgui_light()
 s = System()
 r = RequestHandler(s)
 # server.add_random_requests(10)
 # s.update_requests()
 r.start_requests()
+# dpg.bind_theme(light_theme)
 
 dpg.setup_dearpygui()
 dpg.show_viewport()
@@ -393,7 +409,7 @@ dpg.show_viewport()
 
 
 frame_count = 0
-UPDATE_TIME = 60*20
+UPDATE_TIME = 60*60
 while dpg.is_dearpygui_running():
     # insert here any code you would like to run in the render loop
     # you can manually stop by using stop_dearpygui()

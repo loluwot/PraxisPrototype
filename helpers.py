@@ -12,6 +12,7 @@ def format_helper(prop, r_tup):
     if prop not in ATTRIBUTE_TO_NAME:
         return ''
     if type(r_tup) == tuple or type(r_tup) == list: 
+        # r_tup = r_tup[::-1]
         return FORMATS[safe_index(r_tup, None)].format(*([ATTRIBUTE_TO_NAME[prop]] + [r_val for r_val in r_tup if r_val is not None]))
     return f'{ATTRIBUTE_TO_NAME[prop]}: {r_tup}'
 
@@ -35,3 +36,7 @@ def perp_vector(vec : Tuple):
     if not all(vec):
         return [0 if i != vec.index(0) else 1 for i in range(2)]
     return normalize([1, -vec[0]/vec[1]])
+
+def null_coalesce(v1, v2):
+    return (L := [v1, v2])[(0 if None not in L else (1 - L.index(None)))]
+

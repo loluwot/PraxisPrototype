@@ -13,7 +13,7 @@ import re
 from string import ascii_lowercase
 
 # from torch import R
-from helpers import format_helper
+from helpers import format_helper, null_coalesce
 import networkx as nx
 import matplotlib.pyplot as plt
 import requests
@@ -39,6 +39,7 @@ class FoodType:
     def __init__(self, **args) -> None:
         for k, v in args.items():
             setattr(self, k, v)
+        # setattr(self, 'food_type', getattr(self, 'food_type').replace('Andy ', ''))
         self.rawargs = args
         # self.filters = dict([(k, str(v)) for k, v in args.items()])
 
@@ -552,10 +553,14 @@ class System:
         s = []
         if not x:
             return s
+        
+        raw_labels = defaultdict(lambda : None)
+
         for i, tup in enumerate(x[0]):
             # print('TUPLES', tup)
             # print('NODE INDEX', tup[0])
-            s.append((f"{'Start at' if i == 0 else 'Go to'} {self.index_to_node[tup[0]]}.", ))
+            s.append((f"{'Start at' if i == 0 else 'Go to'} {self.index_to_node[tup[0]]} (labelled {null_coalesce(raw_labels[self.index_to_node[tup[0]]], i)}).", ))
+            raw_labels[self.index_to_node[tup[0]]] = null_coalesce(raw_labels[self.index_to_node[tup[0]]], i)
             if len(tup[1]) > 0:
                 s.extend([(f"{'Pickup' if amt > 0 else 'Dropoff'} {abs(amt)} kg of {{{k.food_type}}}.", k) for k, amt in tup[1].items() if amt != 0])
         return s
